@@ -458,6 +458,9 @@ int emitBinary(char *Argv0, const char *filename,
 }
 
 #include "Lib/clang-mlir.cc"
+#include "Lib/HandleHLS.h"
+#include "Lib/PragmaHanderHLS.h"
+#include "Lib/utils.h"
 int main(int argc, char **argv) {
 
   if (argc >= 1) {
@@ -960,6 +963,11 @@ int main(int argc, char **argv) {
         }
       } while (changed);
     });
+
+    if (HLSAnnotate) {
+      ResolveScope(module.get(), g_HLSMetadata);
+      AttachMetadata(g_HLSMetadata);
+    }
 
     if (EmitLLVM || !EmitAssembly || EmitOpenMPIR || EmitLLVMDialect) {
       mlir::PassManager pm2(&context);
