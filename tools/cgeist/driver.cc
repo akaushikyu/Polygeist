@@ -459,7 +459,7 @@ int emitBinary(char *Argv0, const char *filename,
 
 #include "Lib/clang-mlir.cc"
 #include "Lib/HandleHLS.h"
-#include "Lib/PragmaHanderHLS.h"
+#include "Lib/pragmaHandlerHLS.h"
 #include "Lib/utils.h"
 int main(int argc, char **argv) {
 

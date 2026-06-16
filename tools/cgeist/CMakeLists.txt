@@ -24,6 +24,8 @@ add_clang_executable(cgeist
   "${LLVM_SOURCE_DIR}/../clang/tools/driver/cc1as_main.cpp"
   "${LLVM_SOURCE_DIR}/../clang/tools/driver/cc1gen_reproducer_main.cpp"
   Lib/pragmaHandler.cc
+  Lib/pragmaHandlerHLS.cc
+  Lib/HandleHLS.cc
   Lib/AffineUtils.cc
   Lib/ValueCategory.cc
   Lib/utils.cc
