@@ -60,6 +60,9 @@ static cl::opt<bool> memRefABI("memref-abi", cl::init(true),
 cl::opt<std::string> PrefixABI("prefix-abi", cl::init(""),
                                cl::desc("Prefix for emitted symbols"));
 
+cl::opt<bool> HLSAnnotate("hls-annotate", cl::init(false),
+                              cl::desc("annotate hls pragmas"));
+
 cl::opt<bool> CStyleMemRef("c-style-memref", cl::init(true),
                            cl::desc("Use c style memrefs when possible"));
 

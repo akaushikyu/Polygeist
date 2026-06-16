@@ -12,6 +12,8 @@
 #include "mlir/IR/Builders.h"
 #include "llvm/ADT/ArrayRef.h"
 
+inline bool g_HLSpragmaAnnotate = false;
+
 namespace mlir {
 class Operation;
 namespace func {

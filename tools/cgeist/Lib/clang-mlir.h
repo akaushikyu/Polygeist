@@ -26,6 +26,8 @@
 #include "mlir/Target/LLVMIR/TypeToLLVM.h"
 #include "polygeist/Ops.h"
 #include "pragmaHandler.h"
+#include "pragmaHandlerHLS.h"
+#include "HandleHLS.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Lex/HeaderSearch.h"
@@ -43,6 +45,8 @@ using namespace clang;
 using namespace mlir;
 
 extern llvm::cl::opt<std::string> PrefixABI;
+
+extern llvm::cl::opt<bool> HLSAnnotate;
 
 struct LoopContext {
   mlir::Value keepRunning;
@@ -96,6 +100,7 @@ struct MLIRASTConsumer : public ASTConsumer {
     addPragmaScopHandlers(PP, scopLocList);
     addPragmaEndScopHandlers(PP, scopLocList);
     addPragmaLowerToHandlers(PP, LTInfo);
+    addPragmaHLSHandlers(PP);
   }
 
   ~MLIRASTConsumer() {}
