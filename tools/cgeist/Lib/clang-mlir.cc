@@ -584,6 +584,20 @@ mlir::Value MLIRScanner::createAllocOp(mlir::Type t, VarDecl *name,
     }
     assert(params.find(name) == params.end());
     params[name] = ValueCategory(alloc, /*isReference*/ true);
+
+    // Tag the underlying memref.alloca / llvm.alloca with the C variable name
+    // so HLS pragma resolution can find it later by name.
+    mlir::Operation *defining = alloc.getDefiningOp();
+    while (auto castOp =
+               llvm::dyn_cast_or_null<mlir::memref::CastOp>(defining)) {
+      defining = castOp.getSource().getDefiningOp();
+               }
+    if (defining && (llvm::isa<mlir::memref::AllocaOp>(defining) ||
+                     llvm::isa<mlir::LLVM::AllocaOp>(defining))) {
+      defining->setAttr(
+          "polygeist.varname",
+          mlir::StringAttr::get(builder.getContext(), name->getName()));
+    }
   }
   return alloc;
 }
