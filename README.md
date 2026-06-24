@@ -1,150 +1,116 @@
-# Build instructions
+# Building cgeist (HLS-pragma fork)
 
-## Requirements 
-- Working C and C++ toolchains(compiler, linker)
-- cmake
-- make or ninja
+This is a fork of Polygeist's `cgeist` (Clang → MLIR frontend) modified to **ingest
+HLS pragmas** and attach them as MLIR attributes for downstream BRAM/DSP/LUT
+estimation. Only `cgeist` matters here — the rest of Polygeist (polygeist-opt, GPU
+backends, polymer) is not needed for this flow and is ignored below.
 
-## 1. Clone Polygeist
+Supported pragmas: `array_partition`, `array_reshape`, `bind_storage` (storage-bound,
+resolved against the alloca), `bind_op` (computation-bound, resolved via
+`polygeist.ssa_names`), and `pipeline` / `unroll` / `allocation` (loop/function-bound,
+attached to the resolved scope op).
+
+## Requirements
+- C/C++ toolchain, cmake, ninja (`sudo apt install ninja-build` on a fresh box)
+- Linux / WSL2 (developed on WSL2 Ubuntu 22.04)
+
+
+## 1. Build the pinned LLVM / MLIR / Clang
+
+cgeist links against these, so build them first from Polygeist's nested submodule:
+
 ```sh
-git clone --recursive https://github.com/llvm/Polygeist
-cd Polygeist
-```
-
-## 2. Install LLVM, MLIR, Clang, and Polygeist
-
-### Option 1: Using pre-built LLVM, MLIR, and Clang
-
-Polygeist can be built by providing paths to a pre-built MLIR and Clang toolchain.
-
-#### 1. Build LLVM, MLIR, and Clang:
-```sh
-mkdir llvm-project/build
-cd llvm-project/build
+mkdir Polygeist/llvm-project/build
+cd Polygeist/llvm-project/build
 cmake -G Ninja ../llvm \
   -DLLVM_ENABLE_PROJECTS="mlir;clang" \
   -DLLVM_TARGETS_TO_BUILD="host" \
   -DLLVM_ENABLE_ASSERTIONS=ON \
-  -DCMAKE_BUILD_TYPE=DEBUG
+  -DCMAKE_BUILD_TYPE=DEBUG \
+  -DLLVM_USE_LINKER=lld \
+  -DLLVM_PARALLEL_LINK_JOBS=1 \
+  -DLLVM_OPTIMIZED_TABLEGEN=ON \
+  -DLLVM_USE_SPLIT_DWARF=ON \
+  -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 ninja
-ninja check-mlir
 ```
 
-To enable compilation to cuda add `-DMLIR_ENABLE_CUDA_RUNNER=1` and remove `-DLLVM_TARGETS_TO_BUILD="host"` from the cmake arguments. (You may need to specify `CUDACXX`, `CUDA_PATH`, and/or `-DCMAKE_CUDA_COMPILER`)
+## 2. Build cgeist
 
-To enable the ROCM backend add `-DMLIR_ENABLE_ROCM_RUNNER=1` and remove `-DLLVM_TARGETS_TO_BUILD="host"` from the cmake arguments. (You may need to specify `-DHIP_CLANG_INCLUDE_PATH`, and/or `ROCM_PATH`)
+Configure Polygeist against that LLVM build, then build just the `cgeist` target:
 
-For ISL-enabled polymer, `polly` must be added to the `LLVM_ENABLE_PROJECTS` variable.
-
-For faster compilation we recommend using `-DLLVM_USE_LINKER=lld`.
-
-#### 2. Build Polygeist:
 ```sh
-mkdir build
-cd build
+mkdir Polygeist/build
+cd Polygeist/build
 cmake -G Ninja .. \
   -DMLIR_DIR=$PWD/../llvm-project/build/lib/cmake/mlir \
   -DCLANG_DIR=$PWD/../llvm-project/build/lib/cmake/clang \
+  -DCMAKE_C_COMPILER=$PWD/../llvm-project/build/bin/clang \
+  -DCMAKE_CXX_COMPILER=$PWD/../llvm-project/build/bin/clang++ \
   -DLLVM_TARGETS_TO_BUILD="host" \
   -DLLVM_ENABLE_ASSERTIONS=ON \
-  -DCMAKE_BUILD_TYPE=DEBUG
-ninja
-ninja check-polygeist-opt && ninja check-cgeist
+  -DCMAKE_BUILD_TYPE=DEBUG \
+  -DLLVM_USE_LINKER=lld \
+  -DLLVM_PARALLEL_LINK_JOBS=1 \
+  -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+ninja cgeist
 ```
 
-For faster compilation we recommend using `-DPOLYGEIST_USE_LINKER=lld`.
+`ninja cgeist` builds the single tool — no need to build all of Polygeist.
 
-##### GPU backends
-
-To enable the CUDA backend add `-DPOLYGEIST_ENABLE_CUDA=1`
-
-To enable the ROCM backend add `-DPOLYGEIST_ENABLE_ROCM=1`
-
-##### Polymer
-
-To enable polymer, add `-DPOLYGEIST_ENABLE_POLYMER=1`
-
-There are two configurations of polymer that can be built - one with Pluto and one with ISL. 
-
-###### Pluto
-Add `-DPOLYGEIST_POLYMER_ENABLE_PLUTO=1`
-This will cause the cmake invokation to pull and build the dependencies for polymer. To specify a custom directory for the dependencies, specify `-DPOLYMER_DEP_DIR=<absolute-dir>`. The dependencies will be build using the `tools/polymer/build_polymer_deps.sh`.
-
-To run the polymer pluto tests, use `ninja check-polymer`.
-
-###### ISL
-
-Add `-DPOLYGEIST_POLYMER_ENABLE_ISL=1`
-This requires an `llvm-project` build with `polly` enabled as a subproject.
+Binary lands at `Polygeist/build/bin/cgeist`.
 
 
-### Option 2: Using unified LLVM, MLIR, Clang, and Polygeist build
+## Driving HLS annotation: `--hls-annotate`
 
-Polygeist can also be built as an external LLVM project using [LLVM_EXTERNAL_PROJECTS](https://llvm.org/docs/CMake.html#llvm-related-variables).
+The HLS pragma handling is gated by the **`--hls-annotate`** cgeist flag. Pragmas are
+always parsed, but resolution + attribute attachment only runs when this flag is set —
+and it runs in `driver.cc` *after* the pass pipeline has lifted CFG → SCF → affine, so
+the pragmas attach to real `affine.for` / `memref.alloca` ops rather than raw `cf.br`.
 
-1. Build LLVM, MLIR, Clang, and Polygeist:
+Canonical invocation:
+
 ```sh
-mkdir build
-cd build
-cmake -G Ninja ../llvm-project/llvm \
-  -DLLVM_ENABLE_PROJECTS="clang;mlir" \
-  -DLLVM_EXTERNAL_PROJECTS="polygeist" \
-  -DLLVM_EXTERNAL_POLYGEIST_SOURCE_DIR=.. \
-  -DLLVM_TARGETS_TO_BUILD="host" \
-  -DLLVM_ENABLE_ASSERTIONS=ON \
-  -DCMAKE_BUILD_TYPE=DEBUG
-ninja
-ninja check-polygeist-opt && ninja check-cgeist
+cgeist input.cpp --function="*" -S --hls-annotate --raise-scf-to-affine --memref-fullrank
 ```
 
-`ninja check-polygeist-opt` runs the tests in `Polygeist/test/polygeist-opt`
-`ninja check-cgeist` runs the tests in `Polygeist/tools/cgeist/Test`
+- **With** `--hls-annotate`: allocas/loops/funcs carry `hls.*` attributes, e.g.
+  `hls.array_partition = [{kind = "complete", variable = "arr"}]`
+- **Without** it: cgeist behaves like stock, pragmas are ignored
 
-# Citing Polygeist
+Note `--function="*"` for C++ input: a specific name like `--function=top` won't match
+the mangled symbol (`_Z3topv`), giving an empty `module {}`.
 
-If you use Polygeist, please consider citing the relevant publications:
+## Tests / examples
 
-``` bibtex
-@inproceedings{polygeistPACT,
-  title = {Polygeist: Raising C to Polyhedral MLIR},
-  author = {Moses, William S. and Chelini, Lorenzo and Zhao, Ruizhe and Zinenko, Oleksandr},
-  booktitle = {Proceedings of the ACM International Conference on Parallel Architectures and Compilation Techniques},
-  numpages = {12},
-  location = {Virtual Event},
-  series = {PACT '21},
-  publisher = {Association for Computing Machinery},
-  year = {2021},
-  address = {New York, NY, USA},
-  keywords = {Polygeist, MLIR, Polyhedral, LLVM, Compiler, C++, Pluto, Polly, OpenScop, Parallel, OpenMP, Affine, Raising, Transformation, Splitting, Automatic-Parallelization, Reduction, Polybench},
-}
-@inproceedings{10.1145/3572848.3577475,
-  author = {Moses, William S. and Ivanov, Ivan R. and Domke, Jens and Endo, Toshio and Doerfert, Johannes and Zinenko, Oleksandr},
-  title = {High-Performance GPU-to-CPU Transpilation and Optimization via High-Level Parallel Constructs},
-  year = {2023},
-  isbn = {9798400700156},
-  publisher = {Association for Computing Machinery},
-  address = {New York, NY, USA},
-  url = {https://doi.org/10.1145/3572848.3577475},
-  doi = {10.1145/3572848.3577475},
-  booktitle = {Proceedings of the 28th ACM SIGPLAN Annual Symposium on Principles and Practice of Parallel Programming},
-  pages = {119–134},
-  numpages = {16},
-  keywords = {MLIR, polygeist, CUDA, barrier synchronization},
-  location = {Montreal, QC, Canada},
-  series = {PPoPP '23}
-}
-@inproceedings{10444828,
-  author = {Ivanov, Ivan R. and Zinenko, Oleksandr and Domke, Jens and Endo, Toshio and Moses, William S.},
-  booktitle = {2024 IEEE/ACM International Symposium on Code Generation and Optimization (CGO)},
-  title = {Retargeting and Respecializing GPU Workloads for Performance Portability},
-  year = {2024},
-  volume = {},
-  issn = {},
-  pages = {119-132},
-  doi = {10.1109/CGO57630.2024.10444828},
-  url = {https://doi.ieeecomputersociety.org/10.1109/CGO57630.2024.10444828},
-  publisher = {IEEE Computer Society},
-  address = {Los Alamitos, CA, USA},
-  month = {mar}
-}
+Lit-based examples live in **`/tools/cgeist/Test/HLS`**  these are the reference for
+the expected `hls.*` attribute output per pragma. Run them with the dedicated target:
+
+```sh
+ninja check-cgeist
 ```
+
+Each test is a self-contained `RUN`/`CHECK` pair driven by `--hls-annotate`, e.g.:
+
+```
+//RUN: cgeist %s --function="*" -S --hls-annotate --raise-scf-to-affine --memref-fullrank| FileCheck %s
+
+void basic_array_partition() {
+    int arr[8];
+#pragma HLS array_partition variable=arr complete
+    // Simple computation to test parallel access
+    for(int i = 0; i < 8; i++) {
+        arr[i] += 1;
+    }
+}
+
+// CHECK: %alloca = memref.alloca() {hls.array_partition = [{kind = "complete", variable = "arr"}],
+```
+
+For quick manual checks outside lit, the `basic_test/` kernels + `convert.sh` wrapper
+run cgeist and dump the annotated MLIR directly.
+
+(Adding a new `test/cgeist/` case requires `cgeist` in the `DEPENDS` list of
+`test/CMakeLists.txt` and registered in `test/lit.cfg.py`'s tools so it's on PATH.)
