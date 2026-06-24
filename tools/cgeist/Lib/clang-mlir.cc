@@ -592,7 +592,7 @@ mlir::Value MLIRScanner::createAllocOp(mlir::Type t, VarDecl *name,
                llvm::dyn_cast_or_null<mlir::memref::CastOp>(defining)) {
       defining = castOp.getSource().getDefiningOp();
                }
-    if (defining && (llvm::isa<mlir::memref::AllocaOp>(defining) ||
+    if (HLSAnnotate && defining && (llvm::isa<mlir::memref::AllocaOp>(defining) ||
                      llvm::isa<mlir::LLVM::AllocaOp>(defining))) {
       defining->setAttr(
           "polygeist.varname",
@@ -3032,6 +3032,20 @@ ValueCategory MLIRScanner::VisitBinaryOperator(clang::BinaryOperator *BO) {
             }
           } else if (prevTy.getWidth() > postTy.getWidth()) {
             tostore = builder.create<arith::TruncIOp>(loc, postTy, tostore);
+          }
+        }
+      }
+    }
+    if (HLSAnnotate) {
+      if (auto DRE = dyn_cast<DeclRefExpr>(BO->getLHS()->IgnoreParenCasts())) {
+        if (auto VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+          if (auto *defOp = tostore.getDefiningOp()) {
+            SmallVector<mlir::Attribute, 2> existing;
+            if (auto arr = defOp->getAttrOfType<mlir::ArrayAttr>("polygeist.ssa_names"))
+              existing.append(arr.begin(), arr.end());
+            existing.push_back(builder.getStringAttr(VD->getName()));
+            defOp->setAttr("polygeist.ssa_names",
+                           builder.getArrayAttr(existing));
           }
         }
       }
